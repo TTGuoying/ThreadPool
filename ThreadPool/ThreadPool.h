@@ -52,7 +52,7 @@ public:
 	~ThreadPool();
 
 	BOOL QueueTaskItem(shared_ptr<TaskBase> task, shared_ptr<TaskCallbackBase> taskCb);
-	int getPoolSize() { return threadList.size() - 1; }
+	size_t getPoolSize() { return threadList.size() - 1; }
 
 private:
 	// 线程类(内部类)
