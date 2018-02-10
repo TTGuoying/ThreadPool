@@ -97,6 +97,7 @@ void ThreadPool::GetTaskExcute()
 		EnterCriticalSection(&csWaitTaskLock);
 		waitTaskList.push(waitTask);
 		LeaveCriticalSection(&csWaitTaskLock);
+		PostQueuedCompletionStatus(completionPort, 0, (DWORD)GET_TASK, NULL);
 	}
 	
 }
