@@ -3,10 +3,11 @@
 #include <process.h>
 
 
-ThreadPool::ThreadPool(size_t initSize, size_t maxSize) :
+ThreadPool::ThreadPool(size_t minNumOfThread, size_t maxNumOfThread) :
 	getTaskTask((TaskBase*)new GetTaskTask(this))
 {
-	this->maxSize = maxSize;
+	this->minNumOfThread = minNumOfThread;
+	this->maxNumOfThread = maxNumOfThread;
 	InitializeCriticalSection(&csThreadLock);
 	InitializeCriticalSection(&csWaitTaskLock);
 	stopEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
@@ -14,7 +15,7 @@ ThreadPool::ThreadPool(size_t initSize, size_t maxSize) :
 
 	EnterCriticalSection(&csThreadLock);
 	threadList.clear();
-	for (size_t i = 0; i < initSize; i++)
+	for (size_t i = 0; i < minNumOfThread; i++)
 	{
 		Thread *thread = new Thread;
 		threadList.push_back(thread);
@@ -82,7 +83,7 @@ void ThreadPool::GetTaskExcute()
 			break;
 		}
 	}
-	if (it == threadList.end() && getPoolSize() < maxSize)
+	if (it == threadList.end() && getPoolSize() < maxNumOfThread)
 	{
 		thread = new Thread;
 		threadList.push_back(thread);

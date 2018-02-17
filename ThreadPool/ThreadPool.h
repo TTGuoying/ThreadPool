@@ -5,7 +5,7 @@
 * 其中的TaskBase类是封装了任务类
 * 其中的TaskBase类是封装了任务完成后的回调任务类
 
-*用法：定义一个ThreadPool变量，派生TaskBase类和TaskBase类，重载两个类中的Run()函数，然后调用ThreadPool的QueueTaskItem函()数即可
+*用法：定义一个ThreadPool变量，派生TaskBase类和TaskBase类，重载两个类中的Run()函数，然后调用ThreadPool的QueueTaskItem()函数即可
 
 Author: TTGuoying
 
@@ -26,7 +26,8 @@ using std::shared_ptr;
 class TaskBase
 {
 public:
-	TaskBase() { }
+	TaskBase() { wParam = NULL;  lParam = NULL; }
+	TaskBase(WPARAM wParam, LPARAM lParam) { this->wParam = wParam; this->lParam = lParam;  }
 	virtual ~TaskBase() { }
 
 	WPARAM wParam;              // 参数1
@@ -48,7 +49,7 @@ public:
 class ThreadPool
 {
 public:
-	ThreadPool(size_t initSize = 2, size_t maxSize = 100);
+	ThreadPool(size_t minNumOfThread = 2, size_t maxNumOfThread = 16);
 	~ThreadPool();
 
 	BOOL QueueTaskItem(shared_ptr<TaskBase> task, shared_ptr<TaskCallbackBase> taskCb);
@@ -139,7 +140,8 @@ private:
 
 	HANDLE					stopEvent;					// 通知线程退出的时间
 	HANDLE					completionPort;				// 完成端口
-	size_t maxSize;
+	size_t					maxNumOfThread;
+	size_t					minNumOfThread;
 	shared_ptr<TaskBase>	getTaskTask;				// 取任务的任务
 };
 
