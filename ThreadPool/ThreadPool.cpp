@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "ThreadPool.h"
+#include <process.h>
 
 
 ThreadPool::ThreadPool(size_t initSize, size_t maxSize) :
@@ -110,7 +111,7 @@ ThreadPool::Thread::Thread() :
 	taskCb(NULL),
 	exit(FALSE)
 {
-	thread = CreateThread(0, 0, (LPTHREAD_START_ROUTINE)ThreadProc, this, CREATE_SUSPENDED, 0);
+	thread = (HANDLE)_beginthreadex(0, 0, ThreadProc, this, CREATE_SUSPENDED, 0);
 }
 
 ThreadPool::Thread::~Thread()
@@ -136,9 +137,9 @@ void ThreadPool::Thread::ExecuteTask(shared_ptr<TaskBase> t, shared_ptr<TaskCall
 	ResumeThread(thread);
 }
 
-DWORD ThreadPool::Thread::ThreadProc(LPARAM lParam)
+unsigned int ThreadPool::Thread::ThreadProc(PVOID pM)
 {
-	Thread *pThread = (Thread*)lParam;
+	Thread *pThread = (Thread*)pM;
 
 	while (true)
 	{

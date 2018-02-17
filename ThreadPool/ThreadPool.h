@@ -62,16 +62,16 @@ private:
 		Thread();
 		~Thread();
 
-		BOOL isBusy();									// 是否有任务在执行
+		BOOL isBusy();											// 是否有任务在执行
 		void ExecuteTask(shared_ptr<TaskBase> t, shared_ptr<TaskCallbackBase> tcb);		// 执行任务
 
 	private:
-		BOOL	busy;									// 是否有任务在执行
-		BOOL    exit;									// 是否退出
-		HANDLE  thread;									// 线程句柄
-		shared_ptr<TaskBase>	task;					// 要执行的任务
-		shared_ptr<TaskCallbackBase> taskCb;			// 回调的任务
-		static DWORD WINAPI ThreadProc(LPARAM lParam);  // 线程函数
+		BOOL	busy;											// 是否有任务在执行
+		BOOL    exit;											// 是否退出
+		HANDLE  thread;											// 线程句柄
+		shared_ptr<TaskBase>	task;							// 要执行的任务
+		shared_ptr<TaskCallbackBase> taskCb;					// 回调的任务
+		static unsigned int __stdcall ThreadProc(PVOID pM);		// 线程函数
 	};
 
 	// IOCP的通知种类
@@ -137,8 +137,8 @@ private:
 	CRITICAL_SECTION csWaitTaskLock;
 	queue<shared_ptr<WaitTask>> waitTaskList;			// 任务列表
 
-	HANDLE					stopEvent;				// 通知线程退出的时间
-	HANDLE					completionPort;			// 完成端口
+	HANDLE					stopEvent;					// 通知线程退出的时间
+	HANDLE					completionPort;				// 完成端口
 	size_t maxSize;
 	shared_ptr<TaskBase>	getTaskTask;				// 取任务的任务
 };
