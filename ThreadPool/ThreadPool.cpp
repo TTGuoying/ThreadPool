@@ -3,8 +3,7 @@
 #include <process.h>
 
 
-ThreadPool::ThreadPool(size_t minNumOfThread, size_t maxNumOfThread) :
-	getTaskTask((TaskBase*)new GetTaskTask(this))
+ThreadPool::ThreadPool(size_t minNumOfThread, size_t maxNumOfThread)
 {
 	this->minNumOfThread = minNumOfThread;
 	this->maxNumOfThread = maxNumOfThread;
@@ -17,13 +16,12 @@ ThreadPool::ThreadPool(size_t minNumOfThread, size_t maxNumOfThread) :
 	threadList.clear();
 	for (size_t i = 0; i < minNumOfThread; i++)
 	{
-		Thread *thread = new Thread;
-		threadList.push_back(thread);
+		threadList.push_back((shared_ptr<Thread>)new Thread);
 	}
-	Thread *thread = new Thread;
-	thread->ExecuteTask(getTaskTask, NULL);
-	threadList.push_back(thread);
 	LeaveCriticalSection(&csThreadLock);
+
+	dispatchTaskthread = (shared_ptr<Thread>)new Thread;
+	dispatchTaskthread->ExecuteTask((shared_ptr<TaskBase>)(TaskBase *)new GetTaskTask(this), NULL);
 }
 
 ThreadPool::~ThreadPool()
@@ -31,12 +29,6 @@ ThreadPool::~ThreadPool()
 	SetEvent(stopEvent);
 	PostQueuedCompletionStatus(completionPort, 0, (DWORD)EXIT, NULL);
 	EnterCriticalSection(&csThreadLock);
-	list<Thread *>::iterator it = threadList.begin();
-	for ( ; it != threadList.end(); it++)
-	{
-		Thread *thread = *it;
-		delete thread;
-	}
 	threadList.clear();
 	LeaveCriticalSection(&csThreadLock);
 
@@ -46,10 +38,10 @@ ThreadPool::~ThreadPool()
 	DeleteCriticalSection(&csWaitTaskLock);
 }
 
-BOOL ThreadPool::QueueTaskItem(shared_ptr<TaskBase> task, shared_ptr<TaskCallbackBase> taskCb)
+BOOL ThreadPool::QueueTaskItem(shared_ptr<TaskBase> task, shared_ptr<TaskCallbackBase> taskCb, BOOL longFun)
 {
 	EnterCriticalSection(&csWaitTaskLock);
-	shared_ptr<WaitTask> waitTask(new WaitTask(task, taskCb));
+	shared_ptr<WaitTask> waitTask(new WaitTask(task, taskCb, longFun));
 	waitTaskList.push(waitTask);
 	LeaveCriticalSection(&csWaitTaskLock);
 	PostQueuedCompletionStatus(completionPort, 0, (DWORD)GET_TASK, NULL);
@@ -58,7 +50,7 @@ BOOL ThreadPool::QueueTaskItem(shared_ptr<TaskBase> task, shared_ptr<TaskCallbac
 
 void ThreadPool::GetTaskExcute()
 {
-	Thread *thread = NULL;
+	shared_ptr<Thread> thread = NULL;
 	shared_ptr<WaitTask> waitTask = NULL;
 
 	EnterCriticalSection(&csWaitTaskLock);
@@ -73,28 +65,38 @@ void ThreadPool::GetTaskExcute()
 		return;
 	}
 
-	EnterCriticalSection(&csThreadLock);
-	list<Thread *>::iterator it = threadList.begin();
-	for (; it != threadList.end(); it++)
+	if (waitTask->bLong)
 	{
-		if (!(*it)->isBusy())
-		{
-			thread = *it;
-			break;
-		}
-	}
-	if (it == threadList.end() && getPoolSize() < maxNumOfThread)
-	{
-		thread = new Thread;
+		EnterCriticalSection(&csThreadLock);
+		thread = (shared_ptr<Thread>)new Thread;
 		threadList.push_back(thread);
+		LeaveCriticalSection(&csThreadLock);
 	}
+	else
+	{
+		EnterCriticalSection(&csThreadLock);
+		list<shared_ptr<Thread>>::iterator it = threadList.begin();
+		for (; it != threadList.end(); it++)
+		{
+			if (!(*it)->isBusy())
+			{
+				thread = *it;
+				break;
+			}
+		}
+		if (it == threadList.end() && (maxNumOfThread == 0 || getPoolSize() < maxNumOfThread))
+		{
+			thread = (shared_ptr<Thread>)new Thread;
+			threadList.push_front(thread);
+		}
+		LeaveCriticalSection(&csThreadLock);
+	}
+
 	if (thread != NULL)
 	{
 		thread->ExecuteTask(waitTask->task, waitTask->taskCb);
 	}
-	LeaveCriticalSection(&csThreadLock);
-
-	if (thread == NULL)
+	else
 	{
 		EnterCriticalSection(&csWaitTaskLock);
 		waitTaskList.push(waitTask);

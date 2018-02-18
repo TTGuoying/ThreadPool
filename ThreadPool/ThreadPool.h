@@ -49,11 +49,11 @@ public:
 class ThreadPool
 {
 public:
-	ThreadPool(size_t minNumOfThread = 2, size_t maxNumOfThread = 16);
+	ThreadPool(size_t minNumOfThread = 2, size_t maxNumOfThread = 0);
 	~ThreadPool();
 
-	BOOL QueueTaskItem(shared_ptr<TaskBase> task, shared_ptr<TaskCallbackBase> taskCb);
-	size_t getPoolSize() { return threadList.size() - 1; }
+	BOOL QueueTaskItem(shared_ptr<TaskBase> task, shared_ptr<TaskCallbackBase> taskCb, BOOL longFun = FALSE);
+	size_t getPoolSize() { return threadList.size(); }
 
 private:
 	// 线程类(内部类)
@@ -86,15 +86,17 @@ private:
 	class WaitTask
 	{
 	public:
-		WaitTask(shared_ptr<TaskBase> task, shared_ptr<TaskCallbackBase> taskCb) 
+		WaitTask(shared_ptr<TaskBase> task, shared_ptr<TaskCallbackBase> taskCb, BOOL bLong = FALSE) 
 		{
 			this->task = task;
 			this->taskCb = taskCb;
+			this->bLong = bLong;
 		}
 		~WaitTask() { task = NULL; taskCb = NULL; }
 
 		shared_ptr<TaskBase>	task;					// 要执行的任务
 		shared_ptr<TaskCallbackBase> taskCb;			// 回调的任务
+		BOOL bLong;										// 是否时长任务
 	};
 
 	// 从任务列表取任务的任务
@@ -133,7 +135,7 @@ private:
 	void GetTaskExcute();
 
 	CRITICAL_SECTION csThreadLock;
-	list<Thread *> threadList;							// 线程列表
+	list<shared_ptr<Thread>> threadList;				// 线程列表
 
 	CRITICAL_SECTION csWaitTaskLock;
 	queue<shared_ptr<WaitTask>> waitTaskList;			// 任务列表
@@ -142,7 +144,7 @@ private:
 	HANDLE					completionPort;				// 完成端口
 	size_t					maxNumOfThread;
 	size_t					minNumOfThread;
-	shared_ptr<TaskBase>	getTaskTask;				// 取任务的任务
+	shared_ptr<Thread>		dispatchTaskthread;		// 分发任务的线程
 };
 
 
