@@ -5,61 +5,145 @@
 
 ThreadPool::ThreadPool(size_t minNumOfThread, size_t maxNumOfThread)
 {
-	this->minNumOfThread = minNumOfThread;
-	this->maxNumOfThread = maxNumOfThread;
-	InitializeCriticalSection(&csThreadLock);
-	InitializeCriticalSection(&csWaitTaskLock);
+	if (minNumOfThread < 2)
+		this->minNumOfThread = 2;
+	else
+		this->minNumOfThread = minNumOfThread;
+	if (maxNumOfThread < this->minNumOfThread * 2)
+		this->maxNumOfThread = this->minNumOfThread * 2;
+	else
+		this->maxNumOfThread = maxNumOfThread;
 	stopEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 	completionPort = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 1);
 
-	EnterCriticalSection(&csThreadLock);
-	threadList.clear();
-	for (size_t i = 0; i < minNumOfThread; i++)
-	{
-		threadList.push_back((shared_ptr<Thread>)new Thread);
-	}
-	LeaveCriticalSection(&csThreadLock);
+	idleThreadList.clear();
+	CreateIdleThread(this->minNumOfThread);
+	busyThreadList.clear();
 
-	dispatchTaskthread = (shared_ptr<Thread>)new Thread;
-	dispatchTaskthread->ExecuteTask((shared_ptr<TaskBase>)(TaskBase *)new GetTaskTask(this), NULL);
+	dispatchThrad = (HANDLE)_beginthreadex(0, 0, GetTaskThreadProc, this, 0, 0);
 }
 
 ThreadPool::~ThreadPool()
 {
 	SetEvent(stopEvent);
 	PostQueuedCompletionStatus(completionPort, 0, (DWORD)EXIT, NULL);
-	EnterCriticalSection(&csThreadLock);
-	threadList.clear();
-	LeaveCriticalSection(&csThreadLock);
 
-	
 	CloseHandle(stopEvent);
-	DeleteCriticalSection(&csThreadLock);
-	DeleteCriticalSection(&csWaitTaskLock);
 }
 
 BOOL ThreadPool::QueueTaskItem(shared_ptr<TaskBase> task, shared_ptr<TaskCallbackBase> taskCb, BOOL longFun)
 {
-	EnterCriticalSection(&csWaitTaskLock);
+	waitTaskLock.Lock();
 	shared_ptr<WaitTask> waitTask(new WaitTask(task, taskCb, longFun));
-	waitTaskList.push(waitTask);
-	LeaveCriticalSection(&csWaitTaskLock);
+	waitTaskList.push_back(waitTask);
+	waitTaskLock.UnLock();
 	PostQueuedCompletionStatus(completionPort, 0, (DWORD)GET_TASK, NULL);
 	return TRUE;
 }
 
+void ThreadPool::CreateIdleThread(size_t size)
+{
+	idleThreadLock.Lock();
+	for (size_t i = 0; i < size; i++)
+	{
+		idleThreadList.push_back(new Thread(this));
+	}
+	idleThreadLock.UnLock();
+}
+
+void ThreadPool::DeleteIdleThread(size_t size)
+{
+	idleThreadLock.Lock();
+	size_t t = idleThreadList.size();
+	if (t >= size)
+	{
+		for (size_t i = 0; i < size; i++)
+		{
+			auto thread = idleThreadList.back();
+			delete thread;
+			idleThreadList.pop_back();
+		}
+	}
+	else
+	{
+		for (size_t i = 0; i < t; i++)
+		{
+			auto thread = idleThreadList.back();
+			delete thread;
+			idleThreadList.pop_back();
+		}
+	}
+	idleThreadLock.UnLock();
+}
+
+ThreadPool::Thread *ThreadPool::GetIdleThread()
+{
+	Thread *thread = NULL;
+	idleThreadLock.Lock();
+	if (idleThreadList.size() > 0)
+	{
+		thread = idleThreadList.front();
+		idleThreadList.pop_front();
+	}
+	idleThreadLock.UnLock();
+
+	if (thread == NULL && getCurNumOfThread() < maxNumOfThread)
+	{
+		thread = new Thread(this);
+	}
+
+	if (thread == NULL && waitTaskList.size() > THRESHOLE_OF_WAIT_TASK)
+	{
+		thread = new Thread(this);
+		InterlockedIncrement(&maxNumOfThread);
+	}
+	return thread;
+}
+
+void ThreadPool::MoveBusyThreadToIdleList(Thread * busyThread)
+{
+	idleThreadLock.Lock();
+	idleThreadList.push_back(busyThread);
+	idleThreadLock.UnLock();
+
+	busyThreadLock.Lock();
+	for (auto it = busyThreadList.begin(); it != busyThreadList.end(); it++)
+	{
+		if (*it == busyThread)
+		{
+			busyThreadList.erase(it);
+			break;
+		}
+	}
+	busyThreadLock.UnLock();
+
+	if (maxNumOfThread != 0 && idleThreadList.size() > maxNumOfThread * 0.8)
+	{
+		DeleteIdleThread(idleThreadList.size() / 2);
+	}
+
+	PostQueuedCompletionStatus(completionPort, 0, (DWORD)GET_TASK, NULL);
+}
+
+void ThreadPool::MoveThreadToBusyList(Thread * thread)
+{
+	busyThreadLock.Lock();
+	busyThreadList.push_back(thread);
+	busyThreadLock.UnLock();
+}
+
 void ThreadPool::GetTaskExcute()
 {
-	shared_ptr<Thread> thread = NULL;
+	Thread *thread = NULL;
 	shared_ptr<WaitTask> waitTask = NULL;
 
-	EnterCriticalSection(&csWaitTaskLock);
+	waitTaskLock.Lock();
 	if (waitTaskList.size() > 0)
 	{
 		waitTask = waitTaskList.front();
-		waitTaskList.pop();
+		waitTaskList.pop_front();
 	}
-	LeaveCriticalSection(&csWaitTaskLock);
+	waitTaskLock.UnLock();
 	if (waitTask == NULL)
 	{
 		return;
@@ -67,52 +151,43 @@ void ThreadPool::GetTaskExcute()
 
 	if (waitTask->bLong)
 	{
-		EnterCriticalSection(&csThreadLock);
-		thread = (shared_ptr<Thread>)new Thread;
-		threadList.push_back(thread);
-		LeaveCriticalSection(&csThreadLock);
+		if (idleThreadList.size() > minNumOfThread)
+		{
+			thread = GetIdleThread();
+		}
+		else
+		{
+			thread = new Thread(this);
+			InterlockedIncrement(&maxNumOfThread);
+		}
 	}
 	else
 	{
-		EnterCriticalSection(&csThreadLock);
-		list<shared_ptr<Thread>>::iterator it = threadList.begin();
-		for (; it != threadList.end(); it++)
-		{
-			if (!(*it)->isBusy())
-			{
-				thread = *it;
-				break;
-			}
-		}
-		if (it == threadList.end() && (maxNumOfThread == 0 || getPoolSize() < maxNumOfThread))
-		{
-			thread = (shared_ptr<Thread>)new Thread;
-			threadList.push_front(thread);
-		}
-		LeaveCriticalSection(&csThreadLock);
+		thread = GetIdleThread();
 	}
 
 	if (thread != NULL)
 	{
 		thread->ExecuteTask(waitTask->task, waitTask->taskCb);
+		MoveThreadToBusyList(thread);
 	}
 	else
 	{
-		EnterCriticalSection(&csWaitTaskLock);
-		waitTaskList.push(waitTask);
-		LeaveCriticalSection(&csWaitTaskLock);
-		PostQueuedCompletionStatus(completionPort, 0, (DWORD)GET_TASK, NULL);
+		waitTaskLock.Lock();
+		waitTaskList.push_front(waitTask);
+		waitTaskLock.UnLock();
 	}
 	
 }
 
 
-ThreadPool::Thread::Thread() :
+ThreadPool::Thread::Thread(ThreadPool *threadPool) :
 	busy(FALSE),
 	thread(INVALID_HANDLE_VALUE),
 	task(NULL),
 	taskCb(NULL),
-	exit(FALSE)
+	exit(FALSE),
+	threadPool(threadPool)
 {
 	thread = (HANDLE)_beginthreadex(0, 0, ThreadProc, this, CREATE_SUSPENDED, 0);
 }
@@ -152,6 +227,7 @@ unsigned int ThreadPool::Thread::ThreadProc(PVOID pM)
 		if (pThread->task == NULL && pThread->taskCb == NULL)
 		{
 			pThread->busy = FALSE;
+			pThread->threadPool->MoveBusyThreadToIdleList(pThread);
 			SuspendThread(pThread->thread);
 			continue;
 		}
@@ -162,6 +238,7 @@ unsigned int ThreadPool::Thread::ThreadProc(PVOID pM)
 		pThread->task = NULL;
 		pThread->taskCb == NULL;
 		pThread->busy = FALSE;
+		pThread->threadPool->MoveBusyThreadToIdleList(pThread);
 		SuspendThread(pThread->thread);
 	}
 

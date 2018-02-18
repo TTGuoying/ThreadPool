@@ -23,6 +23,8 @@ using std::list;
 using std::queue;
 using std::shared_ptr;
 
+#define THRESHOLE_OF_WAIT_TASK  20
+
 class TaskBase
 {
 public:
@@ -48,25 +50,19 @@ public:
 
 class ThreadPool
 {
-public:
-	ThreadPool(size_t minNumOfThread = 2, size_t maxNumOfThread = 0);
-	~ThreadPool();
-
-	BOOL QueueTaskItem(shared_ptr<TaskBase> task, shared_ptr<TaskCallbackBase> taskCb = NULL, BOOL longFun = FALSE);
-	size_t getPoolSize() { return threadList.size(); }
-
 private:
 	// 线程类(内部类)
 	class Thread
 	{
 	public:
-		Thread();
+		Thread(ThreadPool *threadPool);
 		~Thread();
 
 		BOOL isBusy();											// 是否有任务在执行
 		void ExecuteTask(shared_ptr<TaskBase> t, shared_ptr<TaskCallbackBase> tcb);		// 执行任务
 
 	private:
+		ThreadPool *threadPool;									// 所属线程池
 		BOOL	busy;											// 是否有任务在执行
 		BOOL    exit;											// 是否退出
 		HANDLE  thread;											// 线程句柄
@@ -99,52 +95,77 @@ private:
 		BOOL bLong;										// 是否时长任务
 	};
 
-	// 从任务列表取任务的任务
-	class GetTaskTask : TaskBase
+	// 从任务列表取任务的线程函数
+	static unsigned int __stdcall GetTaskThreadProc(PVOID pM)
 	{
-	public:
-		GetTaskTask(ThreadPool *threadPool) { wParam = (WPARAM)threadPool; }
-		~GetTaskTask() { }
-
-		int Run()
+		ThreadPool *threadPool = (ThreadPool *)pM;
+		BOOL bRet = FALSE;
+		DWORD dwBytes = 0;
+		WAIT_OPERATION_TYPE opType;
+		OVERLAPPED *ol;
+		while (WAIT_OBJECT_0 != WaitForSingleObject(threadPool->stopEvent, 0))
 		{
-			ThreadPool *threadPool = (ThreadPool *)wParam;
-			BOOL bRet = FALSE;
-			DWORD dwBytes = 0;
-			WAIT_OPERATION_TYPE opType;
-			OVERLAPPED *ol;
-			while (WAIT_OBJECT_0 != WaitForSingleObject(threadPool->stopEvent, 0))
+			BOOL bRet = GetQueuedCompletionStatus(threadPool->completionPort, &dwBytes, (PULONG_PTR)&opType, &ol, INFINITE);
+			// 收到退出标志
+			if (EXIT == (DWORD)opType)
 			{
-				BOOL bRet = GetQueuedCompletionStatus(threadPool->completionPort, &dwBytes, (PULONG_PTR)&opType, &ol, INFINITE);
-				// 收到退出标志
-				if (EXIT == (DWORD)opType)
-				{
-					break;
-				}
-				else if (GET_TASK == (DWORD)opType)
-				{
-					threadPool->GetTaskExcute();
-				}
+				break;
 			}
-
-			return 1;
+			else if (GET_TASK == (DWORD)opType)
+			{
+				threadPool->GetTaskExcute();
+			}
 		}
+		return 0;
+	}
 
+	//线程临界区锁
+	class CriticalSectionLock
+	{
+	private:
+		CRITICAL_SECTION cs;//临界区
+	public:
+		CriticalSectionLock() { InitializeCriticalSection(&cs); }
+		~CriticalSectionLock() { DeleteCriticalSection(&cs); }
+		void Lock() { EnterCriticalSection(&cs); }
+		void UnLock() { LeaveCriticalSection(&cs); }
 	};
 
-	void GetTaskExcute();
 
-	CRITICAL_SECTION csThreadLock;
-	list<shared_ptr<Thread>> threadList;				// 线程列表
+public:
+	ThreadPool(size_t minNumOfThread = 2, size_t maxNumOfThread = 10);
+	~ThreadPool();
 
-	CRITICAL_SECTION csWaitTaskLock;
-	queue<shared_ptr<WaitTask>> waitTaskList;			// 任务列表
+	BOOL QueueTaskItem(shared_ptr<TaskBase> task, shared_ptr<TaskCallbackBase> taskCb = NULL, BOOL longFun = FALSE);	   // 任务入队
+	size_t GetMaxNumOfThread() { return maxNumOfThread; }							// 获取线程池中的最大线程数
+	void SetMaxNumOfThread(size_t size) { maxNumOfThread = size; }					// 设置线程池中的最大线程数
+	size_t GetMinNumOfThread() { return minNumOfThread; }							// 获取线程池中的最小线程数
+	void SetMinNumOfThread(size_t size) { minNumOfThread = size; }					// 设置线程池中的最小线程数
+	size_t getCurNumOfThread() { return getIdleThreadNum() + getBusyThreadNum(); }	// 获取线程池中的当前线程数
 
-	HANDLE					stopEvent;					// 通知线程退出的时间
-	HANDLE					completionPort;				// 完成端口
-	size_t					maxNumOfThread;
-	size_t					minNumOfThread;
-	shared_ptr<Thread>		dispatchTaskthread;			// 分发任务的线程
+private:
+	size_t getIdleThreadNum() { return idleThreadList.size(); }	// 获取线程池中的线程数
+	size_t getBusyThreadNum() { return busyThreadList.size(); }	// 获取线程池中的线程数
+	void CreateIdleThread(size_t size);							// 创建空闲线程
+	void DeleteIdleThread(size_t size);							// 删除空闲线程
+	Thread *GetIdleThread();									// 获取空闲线程
+	void MoveBusyThreadToIdleList(Thread *busyThread);			// 忙碌线程加入空闲列表
+	void MoveThreadToBusyList(Thread *thread);					// 线程加入忙碌列表
+	void GetTaskExcute();										// 从任务队列中取任务执行
+
+	CriticalSectionLock idleThreadLock;							// 空闲线程列表锁
+	list<Thread *> idleThreadList;								// 空闲线程列表
+	CriticalSectionLock busyThreadLock;							// 忙碌线程列表锁
+	list<Thread *> busyThreadList;								// 忙碌线程列表
+
+	CriticalSectionLock waitTaskLock;
+	list<shared_ptr<WaitTask>> waitTaskList;					// 任务列表
+
+	HANDLE					dispatchThrad;						// 分发任务线程
+	HANDLE					stopEvent;							// 通知线程退出的时间
+	HANDLE					completionPort;						// 完成端口
+	size_t					maxNumOfThread;						// 线程池中最大的线程数
+	size_t					minNumOfThread;						// 线程池中最小的线程数
 };
 
 
