@@ -52,7 +52,7 @@ public:
 	ThreadPool(size_t minNumOfThread = 2, size_t maxNumOfThread = 0);
 	~ThreadPool();
 
-	BOOL QueueTaskItem(shared_ptr<TaskBase> task, shared_ptr<TaskCallbackBase> taskCb, BOOL longFun = FALSE);
+	BOOL QueueTaskItem(shared_ptr<TaskBase> task, shared_ptr<TaskCallbackBase> taskCb = NULL, BOOL longFun = FALSE);
 	size_t getPoolSize() { return threadList.size(); }
 
 private:
@@ -86,13 +86,13 @@ private:
 	class WaitTask
 	{
 	public:
-		WaitTask(shared_ptr<TaskBase> task, shared_ptr<TaskCallbackBase> taskCb, BOOL bLong = FALSE) 
+		WaitTask(shared_ptr<TaskBase> task, shared_ptr<TaskCallbackBase> taskCb, BOOL bLong)
 		{
 			this->task = task;
 			this->taskCb = taskCb;
 			this->bLong = bLong;
 		}
-		~WaitTask() { task = NULL; taskCb = NULL; }
+		~WaitTask() { task = NULL; taskCb = NULL; bLong = FALSE; }
 
 		shared_ptr<TaskBase>	task;					// 要执行的任务
 		shared_ptr<TaskCallbackBase> taskCb;			// 回调的任务
@@ -144,7 +144,7 @@ private:
 	HANDLE					completionPort;				// 完成端口
 	size_t					maxNumOfThread;
 	size_t					minNumOfThread;
-	shared_ptr<Thread>		dispatchTaskthread;		// 分发任务的线程
+	shared_ptr<Thread>		dispatchTaskthread;			// 分发任务的线程
 };
 
 
