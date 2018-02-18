@@ -21,6 +21,7 @@ ThreadPool::ThreadPool(size_t minNumOfThread, size_t maxNumOfThread)
 	busyThreadList.clear();
 
 	dispatchThrad = (HANDLE)_beginthreadex(0, 0, GetTaskThreadProc, this, 0, 0);
+	numOfLongFun = 0;
 }
 
 ThreadPool::~ThreadPool()
@@ -158,6 +159,7 @@ void ThreadPool::GetTaskExcute()
 		else
 		{
 			thread = new Thread(this);
+			InterlockedIncrement(&numOfLongFun);
 			InterlockedIncrement(&maxNumOfThread);
 		}
 	}

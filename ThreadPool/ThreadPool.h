@@ -137,13 +137,22 @@ public:
 	~ThreadPool();
 
 	BOOL QueueTaskItem(shared_ptr<TaskBase> task, shared_ptr<TaskCallbackBase> taskCb = NULL, BOOL longFun = FALSE);	   // 任务入队
-	size_t GetMaxNumOfThread() { return maxNumOfThread; }							// 获取线程池中的最大线程数
-	void SetMaxNumOfThread(size_t size) { maxNumOfThread = size; }					// 设置线程池中的最大线程数
-	size_t GetMinNumOfThread() { return minNumOfThread; }							// 获取线程池中的最小线程数
-	void SetMinNumOfThread(size_t size) { minNumOfThread = size; }					// 设置线程池中的最小线程数
-	size_t getCurNumOfThread() { return getIdleThreadNum() + getBusyThreadNum(); }	// 获取线程池中的当前线程数
 
 private:
+	size_t getCurNumOfThread() { return getIdleThreadNum() + getBusyThreadNum(); }	// 获取线程池中的当前线程数
+	size_t GetMaxNumOfThread() { return maxNumOfThread - numOfLongFun; }			// 获取线程池中的最大线程数
+	void SetMaxNumOfThread(size_t size)			// 设置线程池中的最大线程数
+	{ 
+		if (size < numOfLongFun)
+		{
+			maxNumOfThread = size + numOfLongFun;
+		}
+		else
+			maxNumOfThread = size; 
+	}					
+	size_t GetMinNumOfThread() { return minNumOfThread; }							// 获取线程池中的最小线程数
+	void SetMinNumOfThread(size_t size) { minNumOfThread = size; }					// 设置线程池中的最小线程数
+
 	size_t getIdleThreadNum() { return idleThreadList.size(); }	// 获取线程池中的线程数
 	size_t getBusyThreadNum() { return busyThreadList.size(); }	// 获取线程池中的线程数
 	void CreateIdleThread(size_t size);							// 创建空闲线程
@@ -166,6 +175,7 @@ private:
 	HANDLE					completionPort;						// 完成端口
 	size_t					maxNumOfThread;						// 线程池中最大的线程数
 	size_t					minNumOfThread;						// 线程池中最小的线程数
+	size_t					numOfLongFun;						// 线程池中最小的线程数
 };
 
 
