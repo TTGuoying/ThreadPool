@@ -2,6 +2,8 @@
 
 A ThreadPool clss base on IOCP on Windows.
 
+本类配套文章：http://www.cnblogs.com/tanguoying/p/8454637.html
+
 * 类ThreadPool是本代码的核心类，类中自动维护线程池的创建和任务队列的派送
 
 * 其中的TaskBase类是封装了任务类
