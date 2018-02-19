@@ -32,10 +32,10 @@ ThreadPool::~ThreadPool()
 	CloseHandle(stopEvent);
 }
 
-BOOL ThreadPool::QueueTaskItem(shared_ptr<TaskBase> task, shared_ptr<TaskCallbackBase> taskCb, BOOL longFun)
+BOOL ThreadPool::QueueTaskItem(TaskFun task, PVOID param, TaskCallbackFun taskCb, BOOL longFun)
 {
 	waitTaskLock.Lock();
-	shared_ptr<WaitTask> waitTask(new WaitTask(task, taskCb, longFun));
+	WaitTask *waitTask = new WaitTask(task, param, taskCb, longFun);
 	waitTaskList.push_back(waitTask);
 	waitTaskLock.UnLock();
 	PostQueuedCompletionStatus(completionPort, 0, (DWORD)GET_TASK, NULL);
@@ -136,15 +136,9 @@ void ThreadPool::MoveThreadToBusyList(Thread * thread)
 void ThreadPool::GetTaskExcute()
 {
 	Thread *thread = NULL;
-	shared_ptr<WaitTask> waitTask = NULL;
+	WaitTask *waitTask = NULL;
 
-	waitTaskLock.Lock();
-	if (waitTaskList.size() > 0)
-	{
-		waitTask = waitTaskList.front();
-		waitTaskList.pop_front();
-	}
-	waitTaskLock.UnLock();
+	waitTask = GetTask();
 	if (waitTask == NULL)
 	{
 		return;
@@ -170,7 +164,8 @@ void ThreadPool::GetTaskExcute()
 
 	if (thread != NULL)
 	{
-		thread->ExecuteTask(waitTask->task, waitTask->taskCb);
+		thread->ExecuteTask(waitTask->task, waitTask->param, waitTask->taskCb);
+		delete waitTask;
 		MoveThreadToBusyList(thread);
 	}
 	else
@@ -180,6 +175,19 @@ void ThreadPool::GetTaskExcute()
 		waitTaskLock.UnLock();
 	}
 	
+}
+
+ThreadPool::WaitTask *ThreadPool::GetTask()
+{
+	WaitTask *waitTask = NULL;
+	waitTaskLock.Lock();
+	if (waitTaskList.size() > 0)
+	{
+		waitTask = waitTaskList.front();
+		waitTaskList.pop_front();
+	}
+	waitTaskLock.UnLock();
+	return waitTask;
 }
 
 
@@ -209,11 +217,12 @@ BOOL ThreadPool::Thread::isBusy()
 	return busy;
 }
 
-void ThreadPool::Thread::ExecuteTask(shared_ptr<TaskBase> t, shared_ptr<TaskCallbackBase> tcb)
+void ThreadPool::Thread::ExecuteTask(TaskFun task, PVOID param, TaskCallbackFun taskCallback)
 {
 	busy = TRUE;
-	task = t;
-	taskCb = tcb;
+	this->task = task;
+	this->param = param;
+	this->taskCb = taskCallback;
 	ResumeThread(thread);
 }
 
@@ -234,14 +243,26 @@ unsigned int ThreadPool::Thread::ThreadProc(PVOID pM)
 			continue;
 		}
 
-		int resulst = pThread->task->Run();
+		int resulst = pThread->task(pThread->param);
 		if(pThread->taskCb)
-			pThread->taskCb->Run(resulst);
-		pThread->task = NULL;
-		pThread->taskCb == NULL;
-		pThread->busy = FALSE;
-		pThread->threadPool->MoveBusyThreadToIdleList(pThread);
-		SuspendThread(pThread->thread);
+			pThread->taskCb(resulst);
+		WaitTask *waitTask = pThread->threadPool->GetTask();
+		if (waitTask != NULL)
+		{
+			pThread->task = waitTask->task;
+			pThread->taskCb = waitTask->taskCb;
+			delete waitTask;
+			continue;
+		}
+		else
+		{
+			pThread->task = NULL;
+			pThread->param = NULL;
+			pThread->taskCb = NULL;
+			pThread->busy = FALSE;
+			pThread->threadPool->MoveBusyThreadToIdleList(pThread);
+			SuspendThread(pThread->thread);
+		}
 	}
 
 	return 0;
