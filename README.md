@@ -6,11 +6,12 @@ A ThreadPool clss base on IOCP on Windows.
 
 * 类ThreadPool是本代码的核心类，类中自动维护线程池的创建和任务队列的派送
 
-* 其中的TaskBase类是封装了任务类
-* 其中的TaskBase类是封装了任务完成后的回调任务类
+* 其中的TaskFun是任务函数
 
-* 用法：定义一个ThreadPool变量，派生TaskBase类和TaskBase类，重载两个类中的Run()函数，然后调用ThreadPool的QueueTaskItem函()数即可
+* 其中的TaskCallbackFun是回调函数
+
+*用法：定义一个ThreadPool变量，TaskFun函数和TaskCallbackFun回调函数，然后调用ThreadPool的QueueTaskItem()函数即可
 
 Author: TTGuoying
 
-Date: 2018/02/09 19:55
+Date: 2018/02/19 23:15
